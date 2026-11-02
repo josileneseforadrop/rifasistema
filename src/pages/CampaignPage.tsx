@@ -44,6 +44,13 @@ function Gallery({ images, title, subtitle, badge }: { images: string[]; title: 
 function HighlightBox({ c }: { c: Campaign }) {
   const h = c.highlight ?? {}
   const { ms, label } = useCountdown(h.ends_at)
+  // a barra mostra quanto da promoção já passou (de "válido de" até o fim da contagem)
+  const startAt = h.valid_from ? new Date(h.valid_from).getTime() : NaN
+  const endAt = h.ends_at ? new Date(h.ends_at).getTime() : NaN
+  const elapsed = endAt > startAt ? Math.min(100, Math.max(0, ((Date.now() - startAt) / (endAt - startAt)) * 100)) : 0
+  const endsBar = elapsed
+    ? { background: `linear-gradient(90deg, rgba(255,255,255,.12) ${Math.max(0, elapsed - 6)}%, rgba(255,255,255,.5) ${elapsed + 6}%, rgba(255,255,255,.62))` }
+    : undefined
   const now = Date.now()
   if (!h.enabled) return null
   if (h.valid_from && new Date(h.valid_from).getTime() > now) return null
@@ -52,7 +59,7 @@ function HighlightBox({ c }: { c: Campaign }) {
     <div className="highlight">
       {h.title && <h3>{h.title}</h3>}
       {h.ends_at && ms > 0 && (
-        <div className="ends">
+        <div className="ends" style={endsBar}>
           Encerra em <b>{label}</b>
         </div>
       )}
@@ -139,9 +146,9 @@ export default function CampaignPage() {
 
         {c.promotions?.length > 0 && (
           <>
-            <div className="section-title" style={{ margin: '10px 0 12px' }}>
+            <div className="section-title promo-title">
               <span className="emoji">📣</span>
-              <h2 style={{ fontSize: 22 }}>Promoção</h2>
+              <h2>Promoção</h2>
               <small>Compre mais barato!</small>
             </div>
             <div className="promo-row">
