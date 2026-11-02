@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { adminApi, errorMessage } from '../lib/api'
 import type { Campaign, Highlight, OrderBump, PrizeTitle, Promotion, QuickButton } from '../lib/types'
-import { formatPhone, fromLocalInput, money, padNumber, slugify, toLocalInput } from '../lib/format'
+import { formatDateTime, formatPhone, fromLocalInput, money, padNumber, slugify, toLocalInput } from '../lib/format'
 import { Field, ImagesInput, Toggle } from './ui'
 
 type Form = Omit<Campaign, 'id' | 'created_at' | 'sold_count' | 'reserved_count'>
@@ -414,7 +414,12 @@ function PrizeGenerator({ campaignId, available, onDone, onError }: { campaignId
   )
 }
 
-type AdminPrizeTitle = PrizeTitle & { customers: { name: string; phone: string } | null; orders: { code: number } | null }
+type AdminPrizeTitle = PrizeTitle & {
+  customers: { name: string; phone: string } | null
+  orders: { code: number } | null
+  winner_manual?: boolean
+  winner_set_by?: string | null
+}
 
 function PrizeTitles({ campaignId, form }: { campaignId: string; form: Form }) {
   const [list, setList] = useState<AdminPrizeTitle[]>([])
@@ -474,6 +479,25 @@ function PrizeTitles({ campaignId, form }: { campaignId: string; form: Form }) {
     if (!rows.length) return setMsg({ type: 'error', text: 'Cole ao menos uma linha' })
     if (await insert(rows, `${rows.length} títulos importados`)) setBulkText('')
   }
+
+  // retorno de cada linha aparece na própria linha (não só no topo da aba)
+  const [rowMsg, setRowMsg] = useState<Record<string, { type: 'error' | 'success'; text: string }>>({})
+  const [names, setNames] = useState<Record<string, string>>({})
+  const rowRun = async (t: AdminPrizeTitle, fn: () => Promise<unknown>, ok: string) => {
+    setRowMsg((m) => ({ ...m, [t.id]: { type: 'success', text: 'Salvando...' } }))
+    try {
+      await fn()
+      setRowMsg((m) => ({ ...m, [t.id]: { type: 'success', text: ok } }))
+      setNames((n) => ({ ...n, [t.id]: '' }))
+      load()
+    } catch (e) {
+      setRowMsg((m) => ({ ...m, [t.id]: { type: 'error', text: errorMessage(e) } }))
+    }
+  }
+  const setManual = (t: AdminPrizeTitle, name: string) =>
+    rowRun(t, () => adminApi(`/admin/prize-titles/${t.id}/winner`, { body: { manual_name: name } }), `Ganhador "${name}" salvo`)
+  const findBuyer = (t: AdminPrizeTitle) =>
+    rowRun(t, () => adminApi(`/admin/prize-titles/${t.id}/winner`, { body: {} }), 'Comprador do número definido como ganhador')
 
   const assignWinner = (t: AdminPrizeTitle, display_name?: string) =>
     run(() => adminApi(`/admin/prize-titles/${t.id}/winner`, { body: { display_name } }), 'Ganhador atribuído')
@@ -536,17 +560,50 @@ function PrizeTitles({ campaignId, form }: { campaignId: string; form: Form }) {
               <tr key={t.id}>
                 <td><b>{padNumber(t.number, form.number_digits)}</b></td>
                 <td><input className="input" defaultValue={t.prize} onBlur={(e) => e.target.value !== t.prize && run(() => adminApi(`/admin/prize-titles/${t.id}`, { method: 'PUT', body: { prize: e.target.value } }))} /></td>
-                <td>
+                <td style={{ minWidth: 230 }}>
                   {t.winner_name ? (
-                    <input
-                      className="input"
-                      style={{ width: 140 }}
-                      title="Nome exibido no site"
-                      defaultValue={t.winner_name}
-                      onBlur={(e) => e.target.value.trim() && e.target.value !== t.winner_name && assignWinner(t, e.target.value.trim())}
-                    />
+                    <>
+                      <input
+                        className="input"
+                        style={{ width: 160 }}
+                        title="Nome exibido no site"
+                        defaultValue={t.winner_name}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                        onBlur={(e) => {
+                          const v = e.target.value.trim()
+                          if (!v || v === t.winner_name) return
+                          if (t.winner_manual || !t.customers) setManual(t, v)
+                          else assignWinner(t, v)
+                        }}
+                      />
+                      {t.winner_manual && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 3 }} title={t.won_at ? `em ${formatDateTime(t.won_at)}` : ''}>
+                          ✍️ manual{t.winner_set_by ? ` · por ${t.winner_set_by}` : ''}
+                        </div>
+                      )}
+                    </>
                   ) : (
-                    <span className="muted">Disponível</span>
+                    <form
+                      className="row"
+                      style={{ gap: 6, flexWrap: 'nowrap' }}
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const v = (names[t.id] ?? '').trim()
+                        if (v) setManual(t, v)
+                      }}
+                    >
+                      <input
+                        className="input"
+                        style={{ width: 150 }}
+                        placeholder="Nome do ganhador"
+                        value={names[t.id] ?? ''}
+                        onChange={(e) => setNames((n) => ({ ...n, [t.id]: e.target.value }))}
+                      />
+                      <button className="btn sm" disabled={!(names[t.id] ?? '').trim()}>Salvar</button>
+                    </form>
+                  )}
+                  {rowMsg[t.id] && (
+                    <div style={{ fontSize: 11.5, marginTop: 4, color: rowMsg[t.id].type === 'error' ? '#fca5a5' : '#86efac' }}>{rowMsg[t.id].text}</div>
                   )}
                 </td>
                 <td style={{ fontSize: 12 }}>
@@ -562,7 +619,7 @@ function PrizeTitles({ campaignId, form }: { campaignId: string; form: Form }) {
                   {t.winner_name ? (
                     <button className="btn ghost sm" disabled={busy} onClick={() => confirm('Remover o ganhador deste título?') && run(() => adminApi(`/admin/prize-titles/${t.id}/clear-winner`, { body: {} }), 'Ganhador removido')}>Limpar ganhador</button>
                   ) : (
-                    <button className="btn ghost sm" disabled={busy} onClick={() => assignWinner(t)} title="Busca o comprador deste número">Atribuir ganhador</button>
+                    <button className="btn ghost sm" disabled={busy} onClick={() => findBuyer(t)} title="Usa o cliente que comprou e pagou este número no sistema">Buscar comprador</button>
                   )}{' '}
                   <button className="btn danger sm" disabled={busy} onClick={() => confirm(`Remover o título premiado ${t.number}?`) && run(() => adminApi(`/admin/prize-titles/${t.id}`, { method: 'DELETE' }))}>Remover</button>
                 </td>

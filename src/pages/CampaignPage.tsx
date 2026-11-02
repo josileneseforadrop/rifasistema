@@ -9,7 +9,7 @@ import { Spinner } from '../components/Layout'
 import WhatsFloat from '../components/WhatsFloat'
 import CheckoutSheet from '../components/Checkout'
 import ShareButtons from '../components/ShareButtons'
-import { IconCalendar, IconCart, IconCheck, IconMinus, IconPlus } from '../components/Icons'
+import { IconCart, IconCheck, IconMinus, IconPlus } from '../components/Icons'
 
 function Gallery({ images, title, subtitle, badge }: { images: string[]; title: string; subtitle: string | null; badge?: string | null }) {
   const [i, setI] = useState(0)
@@ -136,16 +136,6 @@ export default function CampaignPage() {
         <div className="cp-price">
           Por apenas <b>{money(c.price)}</b>
         </div>
-        {c.show_draw_date && c.draw_date && (
-          <div className="center muted row" style={{ justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-            <IconCalendar /> Sorteio: {formatDateTime(c.draw_date)}
-          </div>
-        )}
-        {c.draw_result && (
-          <div className="alert success center">
-            Resultado: <b>{c.draw_result}</b>
-          </div>
-        )}
 
         {c.promotions?.length > 0 && (
           <>

@@ -124,7 +124,7 @@ async function allocateTickets(c: CampaignRow, orderId: string, customerId: stri
 /** Marca como ganhadores os títulos premiados que já foram pagos. */
 export async function awardPrizes(campaignId: string, orderId?: string) {
   const titles = must(
-    await db.from('prize_titles').select('id,number').eq('campaign_id', campaignId).is('customer_id', null),
+    await db.from('prize_titles').select('id,number').eq('campaign_id', campaignId).is('winner_name', null),
   ) as { id: string; number: number }[]
   if (!titles.length) return
   const byNumber = new Map(titles.map((t) => [Number(t.number), t.id]))
@@ -144,7 +144,7 @@ export async function awardPrizes(campaignId: string, orderId?: string) {
           .from('prize_titles')
           .update({ winner_name: firstName(t.customers?.name ?? ''), customer_id: t.customer_id, order_id: t.order_id, won_at: new Date().toISOString() })
           .eq('id', byNumber.get(Number(t.number))!)
-          .is('customer_id', null),
+          .is('winner_name', null),
       )
     }
   }

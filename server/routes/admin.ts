@@ -274,9 +274,30 @@ adminRouter.put(
  */
 adminRouter.post(
   '/prize-titles/:id/winner',
-  h(async (req) => {
+  h(async (req: AdminReq) => {
     const t = must(await db.from('prize_titles').select('*').eq('id', req.params.id).maybeSingle())
     if (!t) return fail(404, 'Título não encontrado')
+
+    // lançamento manual: só o nome (ex.: ganhador de venda feita fora do sistema)
+    if (req.body.manual_name !== undefined) {
+      const name = str(req.body.manual_name, 60)
+      if (name.length < 2) fail(400, 'Digite o nome do ganhador')
+      must(
+        await db
+          .from('prize_titles')
+          .update({
+            winner_name: name,
+            customer_id: null,
+            order_id: null,
+            won_at: t.won_at ?? new Date().toISOString(),
+            winner_manual: true,
+            winner_set_by: req.admin!.email,
+          })
+          .eq('id', t.id),
+      )
+      return { winner_name: name, manual: true }
+    }
+
     const ticket = must(
       await db
         .from('tickets')
@@ -286,12 +307,12 @@ adminRouter.post(
         .eq('orders.status', 'paid')
         .maybeSingle(),
     )
-    if (!ticket) fail(400, 'Este número ainda não foi vendido em um pedido pago. O ganhador só pode ser quem comprou o número.')
+    if (!ticket) fail(400, 'Este número ainda não foi vendido em um pedido pago no sistema. Se o ganhador comprou por fora, lance o nome manualmente.')
     const display = str(req.body.display_name, 60) || firstName(ticket.customers?.name ?? '')
     must(
       await db
         .from('prize_titles')
-        .update({ winner_name: display, customer_id: ticket.customer_id, order_id: ticket.order_id, won_at: t.won_at ?? new Date().toISOString() })
+        .update({ winner_name: display, customer_id: ticket.customer_id, order_id: ticket.order_id, won_at: t.won_at ?? new Date().toISOString(), winner_manual: false, winner_set_by: req.admin!.email })
         .eq('id', t.id),
     )
     return { winner_name: display, customer: ticket.customers?.name, order_code: ticket.orders?.code }
@@ -301,7 +322,7 @@ adminRouter.post(
 adminRouter.post(
   '/prize-titles/:id/clear-winner',
   h(async (req) => {
-    must(await db.from('prize_titles').update({ winner_name: null, customer_id: null, order_id: null, won_at: null }).eq('id', req.params.id))
+    must(await db.from('prize_titles').update({ winner_name: null, customer_id: null, order_id: null, won_at: null, winner_manual: false, winner_set_by: null }).eq('id', req.params.id))
   }),
 )
 
