@@ -11,6 +11,9 @@ import { birthToIso, formatBirth, formatCpf, formatPhone, isValidCpf, money, onl
 import { getTracking, useCustomer } from '../context/CustomerContext'
 import { track, useSettings } from '../context/SettingsContext'
 
+// no celular não abre o teclado sozinho (cobriria metade do checkout)
+const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+
 // ---------------------------------------------------------------------
 // peças visuais
 // ---------------------------------------------------------------------
@@ -50,7 +53,7 @@ function PhoneInput({ label, value, onChange }: { label: string; value: string; 
         <span className="flag" title="Brasil (+55)">🇧🇷</span>
         <span className="chev">⌄</span>
         <span className="sep" />
-        <input inputMode="tel" placeholder="Telefone" value={value} onChange={(e) => onChange(formatPhone(e.target.value))} />
+        <input inputMode="tel" type="tel" autoComplete="tel-national" placeholder="Telefone" value={value} onChange={(e) => onChange(formatPhone(e.target.value))} />
       </div>
     </OField>
   )
@@ -142,9 +145,10 @@ export function IdentityForm({
       <OField label="Informe seu CPF*" active>
         <input
           inputMode="numeric"
+          autoComplete="off"
           placeholder="000.000.000-00"
           value={cpf}
-          autoFocus
+          autoFocus={!isTouch}
           onChange={(e) => {
             setCpf(formatCpf(e.target.value))
             if (step === 'register') setStep('cpf')
@@ -154,12 +158,12 @@ export function IdentityForm({
       {step === 'register' && (
         <>
           <OField label="Nome Completo*" active={!!name}>
-            <input placeholder="Nome Completo*" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            <input placeholder="Nome Completo*" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!isTouch} />
           </OField>
           <PhoneInput label="Telefone*" value={phone} onChange={setPhone} />
           <PhoneInput label="Confirme o Telefone*" value={phone2} onChange={setPhone2} />
           <OField label="Data de Nascimento*" active={!!birth}>
-            <input inputMode="numeric" placeholder="Data de Nascimento*" value={birth} onChange={(e) => setBirth(formatBirth(e.target.value))} />
+            <input inputMode="numeric" autoComplete="bday" placeholder="Data de Nascimento*" value={birth} onChange={(e) => setBirth(formatBirth(e.target.value))} />
           </OField>
         </>
       )}
