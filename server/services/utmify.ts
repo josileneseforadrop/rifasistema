@@ -67,15 +67,52 @@ async function buildPayload(orderId: string, status: UtmifyStatus) {
   }
 }
 
-/** Envia o status do pedido para a Utmify (não bloqueia a venda se falhar). */
+export interface UtmifyLogEntry {
+  at: string
+  status: UtmifyStatus
+  ok: boolean
+  http?: number
+  error?: string
+  skipped?: string
+  test?: boolean
+  tracking?: Record<string, string | null>
+}
+
+/** registra a tentativa no histórico do pedido (mantém as 20 últimas) */
+async function log(orderId: string, entry: UtmifyLogEntry) {
+  const cur = await db.from('orders').select('utmify_log').eq('id', orderId).maybeSingle()
+  const list = Array.isArray(cur.data?.utmify_log) ? (cur.data!.utmify_log as UtmifyLogEntry[]) : []
+  const label = entry.ok ? entry.status : entry.skipped ? `não enviado: ${entry.status}` : `erro ${entry.http ?? ''}: ${entry.status}`.trim()
+  await db.from('orders').update({ utmify_log: [...list, entry].slice(-20), utmify_status: label }).eq('id', orderId)
+}
+
+/** Envia o status do pedido para a Utmify e registra o resultado no pedido. */
+export async function sendUtmify(orderId: string, status: UtmifyStatus): Promise<UtmifyLogEntry> {
+  const at = new Date().toISOString()
+  const i = await getIntegrations()
+  let entry: UtmifyLogEntry
+  if (!i.utmify_enabled || !i.utmify_api_token) {
+    entry = { at, status, ok: false, skipped: !i.utmify_enabled ? 'Utmify desativada nas configurações' : 'Token da Utmify não configurado' }
+  } else {
+    try {
+      const payload = await buildPayload(orderId, status)
+      const r = await post(i.utmify_api_token, payload)
+      entry = { at, status, ok: r.ok, http: r.status, test: payload.isTest, tracking: payload.trackingParameters }
+      if (!r.ok) {
+        entry.error = r.text.slice(0, 300)
+        console.error(`[utmify] pedido ${orderId} (${status}) falhou: ${r.status} ${entry.error}`)
+      }
+    } catch (e) {
+      entry = { at, status, ok: false, error: (e as Error).message.slice(0, 300) }
+    }
+  }
+  await log(orderId, entry).catch((e) => console.error('[utmify log]', e.message))
+  return entry
+}
+
+/** Dispara o envio sem bloquear a venda. */
 export function notifyUtmify(orderId: string, status: UtmifyStatus) {
-  ;(async () => {
-    const i = await getIntegrations()
-    if (!i.utmify_enabled || !i.utmify_api_token) return
-    const r = await post(i.utmify_api_token, await buildPayload(orderId, status))
-    await db.from('orders').update({ utmify_status: r.ok ? status : `erro ${r.status}: ${status}` }).eq('id', orderId)
-    if (!r.ok) console.error(`[utmify] pedido ${orderId} (${status}) falhou: ${r.status} ${r.text.slice(0, 300)}`)
-  })().catch((e) => console.error('[utmify]', e.message))
+  sendUtmify(orderId, status).catch((e) => console.error('[utmify]', e.message))
 }
 
 /** Envia um pedido de teste (isTest = true, não é salvo na Utmify). */

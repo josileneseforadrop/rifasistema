@@ -21,6 +21,30 @@ interface Row {
   bumps: { qty: number; price: number; label: string | null }[]
   bonus_eligible?: boolean
   bonus_claimed_at?: string | null
+  tracking?: Record<string, string>
+  customer_ip?: string | null
+  utmify_status?: string | null
+  utmify_log?: UtmifyLog[]
+}
+
+interface UtmifyLog {
+  at: string
+  status: string
+  ok: boolean
+  http?: number
+  error?: string
+  skipped?: string
+  test?: boolean
+  tracking?: Record<string, string | null>
+}
+
+const UTM_KEYS = ['utm_source', 'utm_campaign', 'utm_medium', 'utm_content', 'utm_term', 'src', 'sck'] as const
+const UTMIFY_LABEL: Record<string, string> = {
+  waiting_payment: 'Aguardando pagamento',
+  paid: 'Pago',
+  refunded: 'Estornado',
+  chargedback: 'Chargeback',
+  refused: 'Recusado',
 }
 
 const PAGE = 30
@@ -147,7 +171,15 @@ export default function Orders() {
                     <td>{r.code}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.created_at)}</td>
                     <td>{r.customers.name}<div className="muted" style={{ fontSize: 12 }}>{formatPhone(r.customers.phone)}</div></td>
-                    <td>{r.campaigns?.title}</td>
+                    <td>
+                      {r.campaigns?.title}
+                      {r.tracking?.utm_source && (
+                        <div className="muted" style={{ fontSize: 11 }} title={UTM_KEYS.filter((k) => r.tracking?.[k]).map((k) => `${k}: ${r.tracking![k]}`).join('\n')}>
+                          📊 {r.tracking.utm_source}
+                          {r.utmify_status && <span style={{ marginLeft: 6, color: r.utmify_status.startsWith('erro') ? '#fca5a5' : r.utmify_status.startsWith('não') ? '#fcd34d' : '#86efac' }}>● Utmify</span>}
+                        </div>
+                      )}
+                    </td>
                     <td>{r.quantity}</td>
                     <td>{money(r.total)}</td>
                     <td>
@@ -222,6 +254,8 @@ function OrderDetail({ order, onClose, onChanged }: { order: Row; onClose: () =>
           </p>
         )}
       </div>
+      <TrackingSection order={order} />
+
       <h4>Números {order.status !== 'paid' && order.status !== 'pending' && '(liberados)'}</h4>
       {!numbers ? <div className="spinner" /> : numbers.length === 0 ? <p className="muted">Nenhum número reservado.</p> : (
         <div className="numbers" style={{ maxHeight: 220, overflowY: 'auto' }}>
@@ -234,5 +268,101 @@ function OrderDetail({ order, onClose, onChanged }: { order: Row; onClose: () =>
         <a className="btn ghost" href={`/pedido/${order.id}`} target="_blank" rel="noreferrer">Página do pedido</a>
       </div>
     </Modal>
+  )
+}
+
+function TrackingSection({ order }: { order: Row }) {
+  const [log, setLog] = useState<UtmifyLog[]>(order.utmify_log ?? [])
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
+  const tracking = order.tracking ?? {}
+  const hasUtm = UTM_KEYS.some((k) => tracking[k])
+
+  const resend = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const entry = await adminApi<UtmifyLog>(`/admin/orders/${order.id}/utmify`, { body: {} })
+      setLog((l) => [...l, entry])
+      setMsg(
+        entry.ok
+          ? { type: 'success', text: `Enviado à Utmify: ${UTMIFY_LABEL[entry.status] ?? entry.status}${entry.test ? ' (modo teste)' : ''}` }
+          : { type: 'error', text: entry.skipped ?? `A Utmify recusou (${entry.http ?? 'sem resposta'}): ${entry.error ?? ''}` },
+      )
+    } catch (e) {
+      setMsg({ type: 'error', text: errorMessage(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <h4 style={{ margin: '0 0 10px' }}>📊 Rastreamento (UTMs do pedido)</h4>
+      {hasUtm ? (
+        <div className="table-wrap" style={{ marginBottom: 12 }}>
+          <table className="table">
+            <tbody>
+              {UTM_KEYS.map((k) => (
+                <tr key={k}>
+                  <td style={{ width: 140 }}><code>{k}</code></td>
+                  <td style={{ wordBreak: 'break-all' }}>{tracking[k] || <span className="muted">—</span>}</td>
+                </tr>
+              ))}
+              {order.customer_ip && (
+                <tr>
+                  <td><code>IP do cliente</code></td>
+                  <td>{order.customer_ip}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted" style={{ marginTop: 0 }}>
+          Este pedido não tem UTMs: o cliente entrou no site sem parâmetros de rastreamento na URL (tráfego direto/orgânico).
+        </p>
+      )}
+
+      <div className="row" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <h4 style={{ margin: 0 }}>Envios para a Utmify</h4>
+        <span className="spacer" />
+        <button className="btn ghost sm" disabled={busy} onClick={resend}>{busy ? 'Enviando...' : '↻ Reenviar para Utmify'}</button>
+      </div>
+      {msg && <div className={`alert ${msg.type}`}>{msg.text}</div>}
+      {log.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>Nenhum envio registrado para este pedido.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr><th>Data</th><th>Status enviado</th><th>Resultado</th></tr>
+            </thead>
+            <tbody>
+              {[...log].reverse().map((e, i) => (
+                <tr key={i}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(e.at)}</td>
+                  <td>{UTMIFY_LABEL[e.status] ?? e.status}</td>
+                  <td>
+                    {e.ok ? (
+                      <span style={{ color: '#86efac' }}>✓ aceito{e.http ? ` (${e.http})` : ''}{e.test ? ' · modo teste' : ''}</span>
+                    ) : e.skipped ? (
+                      <span style={{ color: '#fcd34d' }}>não enviado — {e.skipped}</span>
+                    ) : (
+                      <span style={{ color: '#fca5a5' }} title={e.error}>✗ recusado{e.http ? ` (${e.http})` : ''}{e.error ? `: ${e.error.slice(0, 120)}` : ''}</span>
+                    )}
+                    {e.tracking && (
+                      <div className="muted" style={{ fontSize: 11.5, marginTop: 4, wordBreak: 'break-all' }}>
+                        UTMs enviadas: {Object.entries(e.tracking).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(' · ') || 'nenhuma'}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }

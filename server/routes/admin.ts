@@ -9,7 +9,7 @@ import { firstName, onlyDigits, optStr, str } from '../util'
 import { clearIntegrationsCache, getIntegrations, maskSecret, publicUrl } from '../services/integrations'
 import { testBynet } from '../services/bynet'
 import { clearScriptsCache } from '../services/scripts'
-import { testUtmify } from '../services/utmify'
+import { sendUtmify, testUtmify, type UtmifyStatus } from '../services/utmify'
 import { awardPrizes, cancelOrder, expireOrders, markPaid, orderNumbers, randomPaidTicket } from '../services/orders'
 
 export const adminRouter = Router()
@@ -440,6 +440,19 @@ adminRouter.get(
 )
 
 adminRouter.get('/orders/:id/tickets', h(async (req) => orderNumbers(String(req.params.id))))
+
+// reenvia o status atual do pedido para a Utmify
+adminRouter.post(
+  '/orders/:id/utmify',
+  h(async (req) => {
+    const o = must(await db.from('orders').select('status,paid_at').eq('id', req.params.id).maybeSingle())
+    if (!o) return fail(404, 'Pedido não encontrado')
+    const status =
+      o.status === 'paid' ? 'paid' : o.status === 'pending' ? 'waiting_payment' : o.status === 'cancelled' && o.paid_at ? 'refunded' : null
+    if (!status) fail(400, 'Pedido expirado ou cancelado sem pagamento: não há status para enviar à Utmify')
+    return sendUtmify(String(req.params.id), status as UtmifyStatus)
+  }),
+)
 
 adminRouter.post(
   '/orders/:id/status',
