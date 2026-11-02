@@ -43,8 +43,14 @@ publicRouter.get(
 publicRouter.get(
   '/campaigns/:slug',
   h(async (req) => {
-    const c = must(await db.from('campaigns').select('*').eq('slug', req.params.slug).neq('status', 'draft').maybeSingle())
+    let c = must(await db.from('campaigns').select('*').eq('slug', req.params.slug).neq('status', 'draft').maybeSingle())
     if (!c) fail(404, 'Campanha não encontrada')
+    // sem tarefa a cada minuto (serverless): libera pedidos vencidos quando alguém abre a campanha
+    if (c.status === 'active' && (lastExpire.get(c.id) ?? 0) < Date.now() - 60_000) {
+      lastExpire.set(c.id, Date.now())
+      await expireOrders(c.id).catch(() => undefined)
+      c = must(await db.from('campaigns').select('*').eq('id', c.id).single())
+    }
     const titles = must(
       await db.from('prize_titles').select('id,number,prize,winner_name,sort_order')
         .eq('campaign_id', c.id)
@@ -83,6 +89,8 @@ publicRouter.get(
 )
 
 // ---------- clientes (identificação por CPF) ----------
+const lastExpire = new Map<string, number>()
+
 const customerJson = (c: { id: string; name: string; phone: string }) => ({ id: c.id, name: c.name, phone: maskPhoneFull(c.phone) })
 
 publicRouter.post(
@@ -261,6 +269,19 @@ publicRouter.post(
       )
     }
     return affiliateStats(phone)
+  }),
+)
+
+// ---------- cron (Vercel Cron / agendador externo): libera pedidos vencidos ----------
+publicRouter.get(
+  '/cron/expire',
+  h(async (req) => {
+    const secret = process.env.CRON_SECRET
+    const auth = req.headers.authorization ?? ''
+    const fromVercel = /vercel-cron/i.test(String(req.headers['user-agent'] ?? ''))
+    if (secret ? auth !== `Bearer ${secret}` : !fromVercel) fail(401, 'Não autorizado')
+    await expireOrders()
+    return { ok: true, at: new Date().toISOString() }
   }),
 )
 

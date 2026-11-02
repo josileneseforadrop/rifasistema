@@ -13,6 +13,7 @@ import { testUtmify } from '../services/utmify'
 import { awardPrizes, cancelOrder, expireOrders, markPaid, orderNumbers, randomPaidTicket } from '../services/orders'
 
 export const adminRouter = Router()
+const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
 
 // ---------------------------------------------------------------------
 // Autenticação
@@ -711,10 +712,31 @@ adminRouter.delete(
 )
 
 // ---------------------------------------------------------------------
+// Upload direto para o Supabase Storage com link assinado (sem passar pelo servidor:
+// funciona no Vercel, que limita cada requisição a ~4,5 MB)
+// ---------------------------------------------------------------------
+adminRouter.post(
+  '/upload-url',
+  h(async (req) => {
+    const type = String(req.body.type ?? '')
+    const size = Number(req.body.size ?? 0)
+    const isVideo = VIDEO_TYPES.includes(type)
+    if (!type.startsWith('image/') && !isVideo) fail(400, 'Envie uma imagem ou um vídeo MP4/WebM/MOV')
+    if (!isVideo && size > 8 * 1024 * 1024) fail(400, 'Imagem muito grande (máx. 8 MB)')
+    if (isVideo && size > 100 * 1024 * 1024) fail(400, 'Vídeo muito grande (máx. 100 MB)')
+    const folder = String(req.body.folder ?? 'uploads').replace(/[^a-z0-9-]/gi, '') || 'uploads'
+    const ext = String(req.body.name ?? '').split('.').pop()?.replace(/[^a-z0-9]/gi, '').slice(0, 5) || (isVideo ? 'mp4' : 'png')
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { data, error } = await db.storage.from(env.STORAGE_BUCKET).createSignedUploadUrl(path)
+    if (error || !data) fail(500, error?.message ?? 'Não foi possível preparar o envio')
+    return { signedUrl: data!.signedUrl, publicUrl: db.storage.from(env.STORAGE_BUCKET).getPublicUrl(path).data.publicUrl }
+  }),
+)
+
+// ---------------------------------------------------------------------
 // Upload de imagens (Supabase Storage)
 // ---------------------------------------------------------------------
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } })
-const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
 
 adminRouter.post(
   '/upload',

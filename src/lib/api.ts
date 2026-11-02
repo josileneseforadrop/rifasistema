@@ -55,10 +55,29 @@ export function errorMessage(e: unknown): string {
   return (e as { message?: string }).message ?? 'Erro desconhecido'
 }
 
+/**
+ * Envia o arquivo direto para o Supabase Storage com um link assinado gerado pelo servidor
+ * (não passa pela API: funciona no Vercel, que limita cada requisição a ~4,5 MB).
+ */
 export async function uploadImage(file: File, folder = 'uploads'): Promise<string> {
+  const { signedUrl, publicUrl } = await adminApi<{ signedUrl: string; publicUrl: string }>('/admin/upload-url', {
+    body: { folder, name: file.name, type: file.type, size: file.size },
+  })
   const form = new FormData()
-  form.append('folder', folder)
-  form.append('file', file)
-  const { url } = await adminApi<{ url: string }>('/admin/upload', { body: form })
-  return url
+  form.append('cacheControl', '31536000')
+  form.append('', file)
+  let res: Response
+  try {
+    res = await fetch(signedUrl, { method: 'PUT', body: form, headers: { 'x-upsert': 'false' } })
+  } catch {
+    throw new ApiError(0, 'Falha de conexão ao enviar o arquivo')
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    const msg = String(data?.message ?? data?.error ?? '')
+    if (res.status === 413 || /exceeded|too large|maximum/i.test(msg))
+      throw new ApiError(413, 'O Supabase recusou o arquivo por tamanho. No plano gratuito o limite é 50 MB por arquivo — comprima o vídeo ou aumente o limite em Storage → Settings.')
+    throw new ApiError(res.status, msg || `Erro ${res.status} ao enviar o arquivo`)
+  }
+  return publicUrl
 }

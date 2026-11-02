@@ -65,13 +65,28 @@ npm run dev      # site em http://localhost:5173 · admin em /admin · API em :3
 ```
 
 ### 4. Produção
+
+**Vercel** (configurado em `vercel.json` + `scripts/build-vercel.mjs`):
+1. Importe o repositório no Vercel (Framework Preset: *Other* — o `vercel.json` já define tudo)
+2. As variáveis vêm do `.env` do repositório (ele é empacotado junto com a função da API).
+   Variáveis cadastradas em *Project Settings → Environment Variables* têm prioridade sobre o `.env`
+3. Recomendado: crie a variável `CRON_SECRET` (qualquer texto aleatório) para proteger a rota do cron
+4. **As migrations não rodam no Vercel.** Sempre que houver migration nova, rode no seu computador:
+   `npm run migrate` (usa a `DATABASE_URL` do `.env`)
+
+Como funciona no Vercel:
+- O site é publicado como arquivos estáticos e toda a API vira **uma função** (`/api/*`)
+- Compras da mesma campanha são processadas em fila por uma trava na tabela `locks`, que vale entre as várias cópias da função
+- Pedidos vencidos são liberados quando alguém abre a campanha ou o pedido, e pelo **Vercel Cron** (`/api/cron/expire`).
+  No plano Hobby o cron roda 1x por dia; no Pro dá para mudar para a cada minuto em `scripts/build-vercel.mjs`
+- Imagens e vídeos são enviados direto do navegador para o Supabase Storage (link assinado), sem o limite de 4,5 MB do Vercel
+- Scripts personalizados são carregados pelo navegador (verificação de domínio do Meta/Google: prefira a verificação por DNS)
+
+**Servidor Node (VPS, Render, Railway):**
 ```bash
 npm run build
-npm start        # serve o site e a API na porta PORT (padrão 3001)
+npm start        # serve o site e a API na porta PORT (padrão 3001) e aplica as migrations
 ```
-Hospede em qualquer serviço que rode Node (VPS, Render, Railway, Fly.io...). Rode **uma única instância** do servidor:
-as compras de uma mesma campanha são processadas em fila dentro do processo para manter os contadores corretos.
-(Mesmo assim, a chave primária da tabela `tickets` impede que um número seja vendido duas vezes.)
 
 ### Gateway Bynet (PIX automático)
 1. Em **Admin → Configurações → Pagamento** escolha "Bynet"
