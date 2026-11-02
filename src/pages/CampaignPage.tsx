@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { Campaign, PrizeTitle } from '../lib/types'
-import { formatDateTime, money, padNumber, progressPercent } from '../lib/format'
+import type { Campaign, PrizeTitle, Winner } from '../lib/types'
+import { formatDateTime, money, padNumber, progressPercent, statusLabel } from '../lib/format'
 import { useCountdown } from '../lib/useCountdown'
-import { track } from '../context/SettingsContext'
+import { track, useSettings } from '../context/SettingsContext'
 import { Spinner } from '../components/Layout'
 import WhatsFloat from '../components/WhatsFloat'
 import CheckoutSheet from '../components/Checkout'
 import ShareButtons from '../components/ShareButtons'
+import WinnerCard from '../components/WinnerCard'
 import { IconCart, IconCheck, IconMinus, IconPlus } from '../components/Icons'
 
-function Gallery({ images, title, subtitle, badge }: { images: string[]; title: string; subtitle: string | null; badge?: string | null }) {
+function Gallery({ images, title, subtitle, badge }: { images: string[]; title: string; subtitle: string | null; badge?: ReactNode }) {
   const [i, setI] = useState(0)
   useEffect(() => {
     if (images.length < 2) return
@@ -33,7 +34,7 @@ function Gallery({ images, title, subtitle, badge }: { images: string[]; title: 
         </>
       )}
       <div className="overlay">
-        {badge && <span className="badge active blink">{badge}</span>}
+        {badge}
         <h1>{title}</h1>
         {subtitle && <div className="sub">{subtitle}</div>}
       </div>
@@ -83,6 +84,8 @@ export default function CampaignPage() {
   const [showReg, setShowReg] = useState(false)
   const [showAllTitles, setShowAllTitles] = useState(false)
   const [checkout, setCheckout] = useState(false)
+  const [winners, setWinners] = useState<Winner[]>([])
+  const { settings } = useSettings()
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -90,6 +93,8 @@ export default function CampaignPage() {
       .then(({ campaign, prize_titles }) => {
         setC(campaign)
         setTitles(prize_titles)
+        if (campaign.status === 'finished')
+          api<Winner[]>('/winners', { query: { campaign: campaign.id, limit: 50 } }).then(setWinners).catch(() => setWinners([]))
         if (search.get('bonus')) sessionStorage.setItem('bonus_from', search.get('bonus')!)
         const above = Number(search.get('acima'))
         const needed = above > 0 && Number(campaign.price) > 0 ? Math.floor(above / Number(campaign.price)) + 1 : 0
@@ -117,6 +122,7 @@ export default function CampaignPage() {
   const clamp = (n: number) => Math.max(c.min_per_order, Math.min(c.max_per_order, Math.floor(n) || c.min_per_order))
   const pct = progressPercent(c)
   const canBuy = c.status === 'active'
+  const finished = c.status === 'finished'
   const wonCount = titles.filter((t) => t.winner_name).length
   const visibleTitles = showAllTitles ? titles : titles.slice(0, 5)
   const url = location.href
@@ -129,14 +135,25 @@ export default function CampaignPage() {
 
   return (
     <main className="page campaign" style={{ paddingTop: 0 }}>
-      <Gallery images={c.images} title={c.title} subtitle={c.subtitle} badge={c.status === 'active' ? c.badge_text : null} />
+      <Gallery
+        images={c.images}
+        title={c.title}
+        subtitle={c.subtitle}
+        badge={
+          c.status === 'active' ? (
+            c.badge_text ? <span className="badge active blink">{c.badge_text}</span> : null
+          ) : (
+            <span className={`badge ${c.status}`}>{statusLabel[c.status]}</span>
+          )
+        }
+      />
       <button className="cp-my" onClick={() => navigate('/meus-titulos')}>
         <IconCart /> Meus títulos
       </button>
       {c.show_progress && (
         <div className="cp-progress">
           <div className="bar" style={{ width: `${pct}%` }} />
-          <span>{pct.toFixed(2)}%</span>
+          <span>{Number.isInteger(Math.round(pct * 100) / 100) ? Math.round(pct) : pct.toFixed(2)}%</span>
         </div>
       )}
       <div className="cp-body">
@@ -144,7 +161,7 @@ export default function CampaignPage() {
           Por apenas <b>{money(c.price)}</b>
         </div>
 
-        {c.promotions?.length > 0 && (
+        {!finished && c.promotions?.length > 0 && (
           <>
             <div className="section-title promo-title">
               <span className="emoji">📣</span>
@@ -161,7 +178,20 @@ export default function CampaignPage() {
           </>
         )}
 
-        <HighlightBox c={c} />
+        {!finished && <HighlightBox c={c} />}
+
+        {finished && winners.length > 0 && (
+          <div className="cp-winners">
+            <div className="section-title">
+              <span className="emoji">🎉</span>
+              <h2>{settings?.winners_title || 'Ganhadores'}</h2>
+              {settings?.winners_subtitle && <small>{settings.winners_subtitle}</small>}
+            </div>
+            {winners.map((w) => (
+              <WinnerCard key={w.id} w={w} inCampaign />
+            ))}
+          </div>
+        )}
 
         {canBuy ? (
           <>
@@ -198,14 +228,16 @@ export default function CampaignPage() {
             </p>
           </>
         ) : (
-          <div className="alert info center" style={{ marginTop: 12 }}>
-            {c.status === 'finished' ? 'Esta campanha foi concluída.' : 'Esta campanha está temporariamente pausada.'}
-          </div>
+          !finished && (
+            <div className="alert info center" style={{ marginTop: 12 }}>
+              Esta campanha está temporariamente pausada.
+            </div>
+          )
         )}
 
         {c.description && (
           <>
-            <div className="reg-wrap">
+            <div className={`reg-wrap ${finished ? 'plain' : ''}`}>
               <button className="reg-btn" onClick={() => setShowReg(!showReg)} aria-expanded={showReg}>
                 <svg width="16" height="16" viewBox="0 0 16 16" style={{ transform: showReg ? 'rotate(180deg)' : undefined }}>
                   <rect width="16" height="16" rx="2" fill="currentColor" />

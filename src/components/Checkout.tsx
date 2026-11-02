@@ -291,7 +291,7 @@ export default function CheckoutSheet({ campaign, quantity, onClose }: { campaig
             </div>
             <div>
               <div className="name">{customer.name}</div>
-              {customer.phone && <div className="phone">+55 {customer.phone}</div>}
+              {customer.phone && <div className="phone">{customer.phone}</div>}
             </div>
           </div>
 

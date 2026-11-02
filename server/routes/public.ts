@@ -67,11 +67,10 @@ publicRouter.get(
   '/winners',
   h(async (req) => {
     const limit = Math.min(500, Number(req.query.limit) || 50)
+    let q = db.from('winners').select('*').eq('published', true)
+    if (typeof req.query.campaign === 'string' && /^[0-9a-f-]{36}$/i.test(req.query.campaign)) q = q.eq('campaign_id', req.query.campaign)
     const rows = must(
-      await db
-        .from('winners')
-        .select('*')
-        .eq('published', true)
+      await q
         .order('sort_order')
         .order('draw_date', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
