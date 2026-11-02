@@ -1,5 +1,6 @@
 import { Suspense, useEffect } from 'react'
-import { Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { captureUrlParams, withSavedParams } from './lib/urlParams'
 import { lazyRetry } from './lib/lazyRetry'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
@@ -20,6 +21,19 @@ import NotFound from './pages/NotFound'
 import { AdminsAdmin, AffiliatesAdmin, AnnouncementsAdmin, CampaignForm, CampaignsList, Customers, Dashboard, Draw, Orders, SettingsAdmin, WinnersAdmin } from './admin/lazy'
 const AdminLayout = lazyRetry(() => import('./admin/AdminLayout'))
 
+/** repassa os parâmetros de rastreamento (UTMs etc.) para todas as páginas públicas */
+function KeepUrlParams() {
+  const { pathname, search, hash } = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (pathname.startsWith('/admin')) return
+    captureUrlParams(search)
+    const merged = withSavedParams(search)
+    if (merged) navigate(`${pathname}${merged}${hash}`, { replace: true })
+  }, [pathname, search, hash, navigate])
+  return null
+}
+
 function PublicLayout() {
   const { pathname } = useLocation()
   useEffect(() => {
@@ -27,6 +41,7 @@ function PublicLayout() {
   }, [pathname])
   return (
     <Layout>
+      <KeepUrlParams />
       <ErrorBoundary resetKey={pathname}>
         <Outlet />
       </ErrorBoundary>
