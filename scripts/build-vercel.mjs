@@ -7,6 +7,8 @@ import { execSync } from 'child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 
 const OUT = '.vercel/output'
+// versão do Node da função (o Vercel desativa versões antigas; troque aqui ou pela variável VERCEL_NODE_RUNTIME)
+const RUNTIME = process.env.VERCEL_NODE_RUNTIME || 'nodejs24.x'
 const FN = `${OUT}/functions/api.func`
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' })
 
@@ -27,7 +29,7 @@ await build({
   outfile: `${FN}/index.js`,
   bundle: true,
   platform: 'node',
-  target: 'node20',
+  target: 'node22',
   format: 'cjs',
   legalComments: 'none',
   external: ['bufferutil', 'utf-8-validate', 'pg-native'],
@@ -36,7 +38,7 @@ await build({
 writeFileSync(`${FN}/package.json`, JSON.stringify({ type: 'commonjs' }))
 writeFileSync(
   `${FN}/.vc-config.json`,
-  JSON.stringify({ runtime: 'nodejs20.x', handler: 'index.js', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 60 }, null, 2),
+  JSON.stringify({ runtime: RUNTIME, handler: 'index.js', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 60 }, null, 2),
 )
 if (existsSync('.env')) {
   copyFileSync('.env', `${FN}/.env`)
@@ -61,4 +63,4 @@ writeFileSync(
     2,
   ),
 )
-console.log('\n✔ build do Vercel pronto em .vercel/output')
+console.log(`\n✔ build do Vercel pronto em .vercel/output (função em ${RUNTIME})`)
